@@ -1,0 +1,9 @@
+.env
+node_modules/
+coralia.db
+coralia.db-journal
+coralia.db-wal
+coralia.db-shm
+uploads/
+*.log
+.DS_Store
