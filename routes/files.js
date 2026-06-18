@@ -152,10 +152,11 @@ router.get('/:projectId', requireClientAuth, (req, res) => {
   // Generar URLs firmadas para cada archivo (expiran en 1 hora)
   const filesWithSignedUrls = files.map(file => ({
     ...file,
-    signed_url: cloudinary.url(file.cloudinary_id, {
-      type:      'authenticated',
-      sign_url:  true,
-      expires_at: Math.floor(Date.now() / 1000) + 3600 // 1 hora
+  signed_url: cloudinary.url(file.cloudinary_id, {
+      type:           'upload',
+      resource_type:  file.file_type === 'video' ? 'video' : 'image',
+      sign_url:       true,
+      expires_at:     Math.floor(Date.now() / 1000) + 3600 // 1 hora
     })
   }));
 
