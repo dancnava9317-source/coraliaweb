@@ -190,11 +190,11 @@ router.get('/download/:projectId', requireClientAuth, async (req, res) => {
   archive.pipe(res);
 
   // Descargar cada archivo de Cloudinary y añadirlo al ZIP
-  for (const file of files) {
-    const signedUrl = cloudinary.url(file.cloudinary_id, {
-      type:      'authenticated',
-      sign_url:  true,
-      expires_at: Math.floor(Date.now() / 1000) + 600 // 10 min, suficiente para el ZIP
+  const signedUrl = cloudinary.url(file.cloudinary_id, {
+      type:           'upload',
+      resource_type:  file.file_type === 'video' ? 'video' : 'image',
+      sign_url:       true,
+      expires_at:     Math.floor(Date.now() / 1000) + 600 // 10 min, suficiente para el ZIP
     });
 
     await new Promise((resolve, reject) => {
@@ -220,7 +220,7 @@ router.delete('/:fileId', requireAdminAuth, async (req, res) => {
   try {
     await cloudinary.uploader.destroy(file.cloudinary_id, {
       resource_type: file.file_type === 'video' ? 'video' : 'image',
-      type: 'authenticated'
+      type: 'upload'
     });
   } catch (err) {
     console.warn('Aviso: no se pudo eliminar de Cloudinary:', err.message);
