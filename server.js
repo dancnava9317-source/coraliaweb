@@ -28,12 +28,11 @@ const PORT = process.env.PORT || 3001;
 
 // CORS: permite que el frontend (en otro dominio) se comunique con este servidor
 app.use(cors({
-  origin: [
-    'http://localhost:5500',    // desarrollo local (Live Server de VS Code)
-    'http://localhost:3000',    // desarrollo local alternativo
-    'https://coralia.mx',       // ← cambia esto por tu dominio real
-    'https://www.coralia.mx'
-  ],
+origin: [
+  'http://localhost:5500',
+  'http://localhost:3000',
+  'https://jovial-mooncake-3a060a.netlify.app'
+],
   methods:     ['GET', 'POST', 'PATCH', 'DELETE'],
   credentials: true
 }));
