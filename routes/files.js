@@ -150,9 +150,12 @@ router.get('/:projectId', requireClientAuth, (req, res) => {
   ).all(projectId);
 
   // Generar URLs firmadas para cada archivo (expiran en 1 hora)
+  // IMPORTANTE: el "type" aquí debe coincidir con el "type" usado al subir
+  // (subimos con type: 'upload' + access_mode: 'authenticated'),
+  // por eso la URL también se firma como type: 'upload'.
   const filesWithSignedUrls = files.map(file => ({
     ...file,
-  signed_url: cloudinary.url(file.cloudinary_id, {
+    signed_url: cloudinary.url(file.cloudinary_id, {
       type:           'upload',
       resource_type:  file.file_type === 'video' ? 'video' : 'image',
       sign_url:       true,
@@ -190,7 +193,8 @@ router.get('/download/:projectId', requireClientAuth, async (req, res) => {
   archive.pipe(res);
 
   // Descargar cada archivo de Cloudinary y añadirlo al ZIP
-  const signedUrl = cloudinary.url(file.cloudinary_id, {
+  for (const file of files) {
+    const signedUrl = cloudinary.url(file.cloudinary_id, {
       type:           'upload',
       resource_type:  file.file_type === 'video' ? 'video' : 'image',
       sign_url:       true,
