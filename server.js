@@ -15,6 +15,8 @@ const authRoutes     = require('./routes/auth');
 const projectRoutes  = require('./routes/projects');
 const fileRoutes     = require('./routes/files');
 const contentRoutes  = require('./routes/content');
+const portfolioRoutes = require('./routes/portfolio');
+const migratePortfolioRoutes = require('./routes/migrate-portfolio');
 
 // Inicializar la base de datos (crea las tablas si no existen)
 require('./database/db');
@@ -28,11 +30,13 @@ const PORT = process.env.PORT || 3001;
 
 // CORS: permite que el frontend (en otro dominio) se comunique con este servidor
 app.use(cors({
-origin: [
-  'http://localhost:5500',
-  'http://localhost:3000',
-  'https://jovial-mooncake-3a060a.netlify.app'
-],
+  origin: [
+    'http://localhost:5500',    // desarrollo local (Live Server de VS Code)
+    'http://localhost:3000',    // desarrollo local alternativo
+    'https://jovial-mooncake-3a060a.netlify.app', // URL temporal de Netlify
+    'https://coraliastudio.mx',       // dominio real
+    'https://www.coraliastudio.mx'
+  ],
   methods:     ['GET', 'POST', 'PATCH', 'DELETE'],
   credentials: true
 }));
@@ -53,6 +57,8 @@ app.use('/api/auth',     authRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/files',    fileRoutes);
 app.use('/api/content',  contentRoutes);
+app.use('/api/portfolio', portfolioRoutes);
+app.use('/api/migrate-portfolio', migratePortfolioRoutes);
 
 // ── Manejo de errores global ───────────────────────────────────
 app.use((err, req, res, next) => {
