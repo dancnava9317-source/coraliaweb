@@ -9,9 +9,10 @@
 //  DELETE /api/projects/:id      → eliminar proyecto (admin)
 // ─────────────────────────────────────────────────────────────
 
-const express  = require('express');
+const express    = require('express');
 const { v4: uuidv4 } = require('uuid');
-const db       = require('../database/db');
+const cloudinary = require('cloudinary').v2;
+const db         = require('../database/db');
 const { requireClientAuth, requireAdminAuth } = require('../middleware/authMiddleware');
 const router   = express.Router();
 
@@ -131,16 +132,39 @@ router.patch('/:id', requireAdminAuth, (req, res) => {
   res.json({ project: updated });
 });
 
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key:    process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
 // ── DELETE /api/projects/:id — eliminar proyecto (admin) ──────
-router.delete('/:id', requireAdminAuth, (req, res) => {
+// Elimina el proyecto, sus archivos en la base de datos (en cascada),
+// y también las fotos/videos reales en Cloudinary para no dejar
+// archivos huérfanos ocupando espacio de almacenamiento.
+router.delete('/:id', requireAdminAuth, async (req, res) => {
   const { id } = req.params;
   const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
   if (!project) return res.status(404).json({ error: 'Proyecto no encontrado.' });
 
-  // Los archivos se eliminan en cascada por la constraint de la DB
+  const files = db.prepare('SELECT * FROM files WHERE project_id = ?').all(id);
+
+  // Eliminar cada archivo de Cloudinary (si alguno falla, seguimos con los demás)
+  for (const file of files) {
+    try {
+      await cloudinary.uploader.destroy(file.cloudinary_id, {
+        resource_type: file.file_type === 'video' ? 'video' : 'image',
+        type: 'upload'
+      });
+    } catch (err) {
+      console.warn(`Aviso: no se pudo eliminar de Cloudinary el archivo ${file.cloudinary_id}:`, err.message);
+    }
+  }
+
+  // Los registros de archivos se eliminan en cascada por la constraint de la DB
   db.prepare('DELETE FROM projects WHERE id = ?').run(id);
 
-  res.json({ message: 'Proyecto eliminado correctamente.' });
+  res.json({ message: 'Proyecto y todos sus archivos eliminados correctamente.' });
 });
 
 module.exports = router;
