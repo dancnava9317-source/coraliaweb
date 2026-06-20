@@ -58,6 +58,20 @@ db.exec(`
     value       TEXT NOT NULL,
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Tabla de fotos del portafolio público, organizadas por álbum.
+  -- "album" es una de las 6 categorías fijas del sitio: bodas, maternidad,
+  -- retratos, comercial, food, eventos — coincide con los data-filter del HTML.
+  CREATE TABLE IF NOT EXISTS portfolio_photos (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    album         TEXT    NOT NULL,
+    cloudinary_id TEXT    NOT NULL,
+    url           TEXT    NOT NULL,
+    caption_es    TEXT    DEFAULT '',
+    caption_en    TEXT    DEFAULT '',
+    sort_order    INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
 `);
 
 console.log('✅ Base de datos lista: coralia.db');
