@@ -1,9 +1,14 @@
 // routes/portfolio.js
 // ─────────────────────────────────────────────────────────────
-//  Rutas para las fotos del portafolio público, organizadas por álbum.
-//  Los álbumes son las 6 categorías fijas del sitio:
-//  bodas, maternidad, retratos, comercial, food, eventos
+//  Rutas para los álbumes y fotos del portafolio público.
 //
+//  Álbumes (administrables: crear, eliminar, renombrar texto visible):
+//  GET    /api/portfolio/albums         → lista de álbumes (público)
+//  POST   /api/portfolio/albums         → crear álbum nuevo (admin)
+//  PATCH  /api/portfolio/albums/:slug   → renombrar texto visible (admin)
+//  DELETE /api/portfolio/albums/:slug   → eliminar álbum y sus fotos (admin)
+//
+//  Fotos:
 //  GET    /api/portfolio              → todas las fotos de todos los álbumes (público)
 //  GET    /api/portfolio/:album       → fotos de un álbum específico (público)
 //  POST   /api/portfolio/:album/upload → subir fotos a un álbum (admin, máx 20 por álbum)
@@ -26,9 +31,6 @@ cloudinary.config({
 
 const MAX_PHOTOS_PER_ALBUM = 20;
 
-// Álbumes válidos — deben coincidir exactamente con los data-filter del HTML público
-const VALID_ALBUMS = ['bodas', 'maternidad', 'retratos', 'comercial', 'food', 'eventos'];
-
 const upload = multer({
   storage: multer.memoryStorage(),
   limits:  { fileSize: 15 * 1024 * 1024 }, // 15 MB por foto
@@ -39,19 +41,147 @@ const upload = multer({
   }
 });
 
-function isValidAlbum(album){
-  return VALID_ALBUMS.includes(album);
+function isValidAlbum(slug){
+  const row = db.prepare('SELECT 1 FROM portfolio_albums WHERE slug = ?').get(slug);
+  return !!row;
 }
+
+function getAllAlbumSlugs(){
+  return db.prepare('SELECT slug FROM portfolio_albums').all().map(r => r.slug);
+}
+
+// Convierte un nombre escrito por el usuario ("Bodas y Compromisos") en un
+// identificador interno seguro ("bodas-y-compromisos"): sin acentos, espacios
+// reemplazados por guiones, solo minúsculas y caracteres alfanuméricos.
+function slugify(text){
+  return text
+    .toString()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // quita acentos
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-');
+}
+
+// ═══════════════════════════════════════════════════════════
+//  ÁLBUMES
+// ═══════════════════════════════════════════════════════════
+
+// ── GET /api/portfolio/albums — lista de álbumes con su conteo de fotos ──
+router.get('/albums', (req, res) => {
+  const albums = db.prepare(`
+    SELECT a.*, COUNT(p.id) as photo_count
+    FROM portfolio_albums a
+    LEFT JOIN portfolio_photos p ON p.album = a.slug
+    GROUP BY a.id
+    ORDER BY a.sort_order ASC, a.id ASC
+  `).all();
+
+  res.json({ albums });
+});
+
+// ── POST /api/portfolio/albums — crear álbum nuevo (admin) ──
+// Body: { "name_es": "Bodas y Compromisos", "name_en": "Weddings & Engagements" }
+router.post('/albums', requireAdminAuth, (req, res) => {
+  const { name_es, name_en } = req.body;
+  if (!name_es || !name_es.trim()) {
+    return res.status(400).json({ error: 'El nombre del álbum en español es obligatorio.' });
+  }
+
+  const baseSlug = slugify(name_es);
+  if (!baseSlug) {
+    return res.status(400).json({ error: 'El nombre del álbum debe contener al menos una letra o número.' });
+  }
+
+  // Si el slug ya existe, le agregamos un sufijo numérico para que sea único
+  let slug = baseSlug;
+  let suffix = 2;
+  while (isValidAlbum(slug)) {
+    slug = `${baseSlug}-${suffix}`;
+    suffix++;
+  }
+
+  const { maxOrder } = db.prepare(
+    'SELECT COALESCE(MAX(sort_order), -1) as maxOrder FROM portfolio_albums'
+  ).get();
+
+  const result = db.prepare(`
+    INSERT INTO portfolio_albums (slug, name_es, name_en, sort_order)
+    VALUES (?, ?, ?, ?)
+  `).run(slug, name_es.trim(), (name_en || name_es).trim(), maxOrder + 1);
+
+  res.json({
+    message: 'Álbum creado correctamente.',
+    album: { id: result.lastInsertRowid, slug, name_es, name_en: name_en || name_es }
+  });
+});
+
+// ── PATCH /api/portfolio/albums/:slug — renombrar el texto visible (admin) ──
+// El identificador interno (slug) NUNCA cambia, solo name_es / name_en.
+router.patch('/albums/:slug', requireAdminAuth, (req, res) => {
+  const { slug } = req.params;
+  const { name_es, name_en } = req.body;
+
+  if (!isValidAlbum(slug)) {
+    return res.status(404).json({ error: 'Álbum no encontrado.' });
+  }
+  if (!name_es || !name_es.trim()) {
+    return res.status(400).json({ error: 'El nombre del álbum en español es obligatorio.' });
+  }
+
+  db.prepare(`
+    UPDATE portfolio_albums SET name_es = ?, name_en = ? WHERE slug = ?
+  `).run(name_es.trim(), (name_en || name_es).trim(), slug);
+
+  res.json({ message: 'Álbum actualizado correctamente.' });
+});
+
+// ── DELETE /api/portfolio/albums/:slug — eliminar álbum y sus fotos (admin) ──
+// Protección: no se permite eliminar si es el único álbum que queda.
+router.delete('/albums/:slug', requireAdminAuth, async (req, res) => {
+  const { slug } = req.params;
+
+  if (!isValidAlbum(slug)) {
+    return res.status(404).json({ error: 'Álbum no encontrado.' });
+  }
+
+  const { total } = db.prepare('SELECT COUNT(*) as total FROM portfolio_albums').get();
+  if (total <= 1) {
+    return res.status(400).json({
+      error: 'No puedes eliminar el último álbum del portafolio. Crea otro antes de borrar este, o simplemente renómbralo.'
+    });
+  }
+
+  // Borrar también las fotos del álbum, tanto de Cloudinary como de la base de datos
+  const photos = db.prepare('SELECT * FROM portfolio_photos WHERE album = ?').all(slug);
+  for (const photo of photos) {
+    try {
+      await cloudinary.uploader.destroy(photo.cloudinary_id, { resource_type: 'image', type: 'upload' });
+    } catch (err) {
+      console.warn(`Aviso: no se pudo eliminar de Cloudinary la foto ${photo.cloudinary_id}:`, err.message);
+    }
+  }
+  db.prepare('DELETE FROM portfolio_photos WHERE album = ?').run(slug);
+  db.prepare('DELETE FROM portfolio_albums WHERE slug = ?').run(slug);
+
+  res.json({ message: `Álbum eliminado junto con sus ${photos.length} foto(s).` });
+});
+
+// ═══════════════════════════════════════════════════════════
+//  FOTOS
+// ═══════════════════════════════════════════════════════════
 
 // ── GET /api/portfolio — todas las fotos, agrupadas por álbum ──
 // Pública (sin login) porque el sitio principal la consulta para pintar el portafolio.
 router.get('/', (req, res) => {
+  const albumSlugs = getAllAlbumSlugs();
   const rows = db.prepare(
     'SELECT * FROM portfolio_photos ORDER BY album ASC, sort_order ASC, id ASC'
   ).all();
 
   const byAlbum = {};
-  VALID_ALBUMS.forEach(a => byAlbum[a] = []);
+  albumSlugs.forEach(a => byAlbum[a] = []);
   rows.forEach(photo => {
     if (!byAlbum[photo.album]) byAlbum[photo.album] = [];
     byAlbum[photo.album].push(photo);
@@ -64,7 +194,7 @@ router.get('/', (req, res) => {
 router.get('/:album', (req, res) => {
   const { album } = req.params;
   if (!isValidAlbum(album)) {
-    return res.status(400).json({ error: `Álbum inválido. Debe ser uno de: ${VALID_ALBUMS.join(', ')}` });
+    return res.status(400).json({ error: `Álbum inválido.` });
   }
 
   const photos = db.prepare(
@@ -80,7 +210,7 @@ router.get('/:album', (req, res) => {
 router.post('/:album/upload', requireAdminAuth, upload.array('photos', 20), async (req, res) => {
   const { album } = req.params;
   if (!isValidAlbum(album)) {
-    return res.status(400).json({ error: `Álbum inválido. Debe ser uno de: ${VALID_ALBUMS.join(', ')}` });
+    return res.status(400).json({ error: `Álbum inválido.` });
   }
 
   if (!req.files || req.files.length === 0) {
